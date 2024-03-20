@@ -155,6 +155,7 @@ class AutoClickerApp:
             self.running = False
             self.stop_button.configure(state="disabled")
             self.start_button.configure(state="normal")
+            time.sleep(.1)
             self.root.deiconify()  # Show the root window
             self.root.lift()  # Bring the root window to the front
 
@@ -167,6 +168,7 @@ class AutoClickerApp:
                 if self.auto_click_coordinates:
                     # Move the cursor slightly before clicking
                     pyautogui.move(1, 1)  # Example: Move 1 pixel to the right and 1 pixel down
+                    pyautogui.move(-1, -1)  # Example: Move 1 pixel to the right and 1 pixel down
                     pyautogui.click(x=self.auto_click_coordinates[0], y=self.auto_click_coordinates[1])
                 else:
                     pyautogui.click()
