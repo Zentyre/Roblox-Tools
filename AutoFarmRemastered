@@ -1,0 +1,284 @@
+import tkinter as tk
+import pydirectinput
+import time
+import json
+import os
+import keyboard
+from tkinter import messagebox, simpledialog, filedialog
+from tkinter import Toplevel, Label, Entry, Button
+from threading import Thread
+
+class ClickRecorder:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Click Recorder")
+
+        self.positions = []
+        self.running = False
+        self.action_thread = None
+
+        # Initialize the GUI components
+        self.label = tk.Label(root, text="Press 'Record Position' and then click on the screen.")
+        self.label.pack(pady=10)
+
+        self.record_button = tk.Button(root, text="Record Position", command=self.record_position)
+        self.record_button.pack(pady=5)
+
+        self.clear_button = tk.Button(root, text="Clear Positions", command=self.clear_positions)
+        self.clear_button.pack(pady=5)
+
+        self.start_button = tk.Button(root, text="Start Actions", command=self.toggle_actions)
+        self.start_button.pack(pady=5)
+
+        self.interval_label = tk.Label(root, text="Interval (seconds) between actions:")
+        self.interval_label.pack(pady=5)
+
+        self.interval_entry = tk.Entry(root)
+        self.interval_entry.pack(pady=5)
+
+        self.loop_var = tk.BooleanVar()
+        self.loop_checkbutton = tk.Checkbutton(root, text="Loop Actions", variable=self.loop_var, command=self.toggle_loop_interval)
+        self.loop_checkbutton.pack(pady=5)
+
+        self.loop_interval_label = tk.Label(root, text="Interval (seconds) between loops:", state=tk.DISABLED)
+        self.loop_interval_label.pack(pady=5)
+
+        self.loop_interval_entry = tk.Entry(root, state=tk.DISABLED)
+        self.loop_interval_entry.pack(pady=5)
+
+        self.position_listbox = tk.Listbox(root, width=50, height=10)
+        self.position_listbox.pack(pady=10)
+
+        self.button_frame = tk.Frame(root)
+        self.button_frame.pack(pady=10)
+
+        self.edit_button = tk.Button(self.button_frame, text="Edit Selected", command=self.edit_position)
+        self.edit_button.pack(side=tk.LEFT, padx=10)
+
+        self.delete_button = tk.Button(self.button_frame, text="Delete Selected", command=self.delete_position)
+        self.delete_button.pack(side=tk.LEFT, padx=10)
+
+        # Ensure the interval entry fields are editable
+        self.interval_entry.focus_set()
+        
+        # Validate interval entry to allow only numeric input
+        self.interval_entry.config(validate="key", validatecommand=(self.root.register(self.validate_interval_entry), '%S'))
+
+        self.load_positions()
+
+        # Setup keyboard listener for 'P' key
+        keyboard.add_hotkey('p', self.toggle_actions)
+
+        self.load_button = tk.Button(root, text="Load Positions", command=self.load_positions_from_file)
+        self.load_button.pack(pady=5)
+
+    def load_positions_from_file(self, file_path=None):
+        if file_path is None:
+            file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
+    
+        if not file_path:
+            return  # No file selected or dialog cancelled
+    
+        try:
+            with open(file_path, "r") as f:
+                self.positions = json.load(f)
+                messagebox.showinfo("Positions Loaded", f"Loaded {len(self.positions)} positions from file: {file_path}")
+                self.update_position_listbox()
+                self.interval_entry.focus_set()
+        except Exception as e:
+            messagebox.showerror("Error", f"Error loading positions: {e}")
+
+    def toggle_loop_interval(self):
+        if self.loop_var.get():
+            self.loop_interval_label.config(state=tk.NORMAL)
+            self.loop_interval_entry.config(state=tk.NORMAL)
+        else:
+            self.loop_interval_label.config(state=tk.DISABLED)
+            self.loop_interval_entry.config(state=tk.DISABLED)
+        self.interval_entry.focus_set()
+
+    def save_positions(self):
+        try:
+            with open("positions.json", "w") as f:
+                json.dump(self.positions, f)
+        except Exception as e:
+            print(f"Error saving positions: {e}")
+
+    def load_positions(self):
+        try:
+            if os.path.exists("positions.json"):
+                with open("positions.json", "r") as f:
+                    self.positions = json.load(f)
+                    messagebox.showinfo("Positions Loaded", f"Loaded {len(self.positions)} positions from file.")
+                    self.update_position_listbox()
+                    self.interval_entry.focus_set()
+        except Exception as e:
+            print(f"Error loading positions: {e}")
+
+    def clear_positions(self):
+        self.positions = []
+        self.save_positions()
+        self.update_position_listbox()
+        messagebox.showinfo("Positions Cleared", "All recorded positions have been cleared.")
+        self.interval_entry.focus_set()
+
+    def record_position(self):
+        try:
+            self.root.withdraw()
+            messagebox.showinfo("Record Position", "Move your mouse to the desired position and press Enter.")
+            self.root.after(1000, self.get_mouse_position)
+        except Exception as e:
+            print(f"Error in record_position: {e}")
+            self.root.deiconify()
+
+    def get_mouse_position(self):
+        try:
+            x, y = pydirectinput.position()
+            key_input = simpledialog.askstring("Keyboard Input", "Enter the keyboard input to perform after this click (leave blank for no input):")
+            self.positions.append((x, y, key_input))
+            self.save_positions()
+            self.update_position_listbox()
+            self.root.deiconify()
+            messagebox.showinfo("Position Recorded", f"Recorded position: ({x}, {y}) with keyboard input: {key_input}")
+            self.interval_entry.focus_set()
+        except Exception as e:
+            print(f"Error in get_mouse_position: {e}")
+            self.root.deiconify()
+
+    def update_position_listbox(self):
+        self.position_listbox.delete(0, tk.END)
+        for pos in self.positions:
+            x, y, key_input = pos
+            display_text = f"Position: ({x}, {y}), Keyboard Input: {key_input or 'None'}"
+            self.position_listbox.insert(tk.END, display_text)
+
+    def toggle_actions(self):
+        if self.running:
+            self.stop_actions()
+        else:
+            self.start_actions()
+
+    def start_actions(self):
+        try:
+            interval = float(self.interval_entry.get())
+            if self.loop_var.get():
+                loop_interval = float(self.loop_interval_entry.get())
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Please enter a valid number for the interval.")
+            return
+
+        self.running = True
+        self.root.withdraw()
+        messagebox.showinfo("Start Actions", "Actions will start in 3 seconds. Press OK and get ready.")
+        time.sleep(3)
+
+        def perform_actions():
+            try:
+                while self.running:
+                    for pos in self.positions:
+                        if not self.running:
+                            break
+                        x, y, key_input = pos
+                        pydirectinput.moveTo(x,y, duration= .1)
+                        pydirectinput.click(x, y)
+                        time.sleep(interval)  # Pause after the click
+                        if key_input:
+                            for char in key_input:
+                                pydirectinput.typewrite(char)
+                                time.sleep(interval)  # Pause after each keyboard input
+                    if not self.loop_var.get() or not self.running:
+                        break
+                    time.sleep(loop_interval)  # Pause between loops
+                self.root.deiconify()
+            except Exception as e:
+                print(f"Error in perform_actions: {e}")
+                self.root.deiconify()
+
+        self.action_thread = Thread(target=perform_actions)
+        self.action_thread.start()
+
+    def stop_actions(self):
+        self.running = False
+        if self.action_thread:
+            self.action_thread.join()
+        messagebox.showinfo("Stopped", "Actions have been stopped.")
+        self.root.deiconify()
+
+    def edit_position(self):
+        try:
+            selected_index = self.position_listbox.curselection()[0]
+            pos = self.positions[selected_index]
+            x, y, key_input = pos
+
+            edit_window = Toplevel(self.root)
+            edit_window.title("Edit Position")
+
+            Label(edit_window, text="X Position:").grid(row=0, column=0, padx=10, pady=5)
+            x_entry = Entry(edit_window)
+            x_entry.grid(row=0, column=1, padx=10, pady=5)
+            x_entry.insert(0, x)
+
+            Label(edit_window, text="Y Position:").grid(row=1, column=0, padx=10, pady=5)
+            y_entry = Entry(edit_window)
+            y_entry.grid(row=1, column=1, padx=10, pady=5)
+            y_entry.insert(0, y)
+
+            Label(edit_window, text="Keyboard Input:").grid(row=2, column=0, padx=10, pady=5)
+            key_input_entry = Entry(edit_window)
+            key_input_entry.grid(row=2, column=1, padx=10, pady=5)
+            key_input_entry.insert(0, key_input)
+
+            def save_changes():
+                try:
+                    new_x = int(x_entry.get())
+                    new_y = int(y_entry.get())
+                    new_key_input = key_input_entry.get()
+                    self.positions[selected_index] = (new_x, new_y, new_key_input)
+                    self.save_positions()
+                    self.update_position_listbox()
+                    edit_window.destroy()
+                except ValueError:
+                    messagebox.showerror("Invalid Input", "Please enter valid numbers for the positions.")
+
+            Button(edit_window, text="Save", command=save_changes).grid(row=3, column=0, columnspan=2, pady=10)
+
+        except IndexError:
+            messagebox.showwarning("Edit Position", "Please select a position to edit.")
+        except Exception as e:
+            print(f"Error in edit_position: {e}")
+    def validate_interval_entry(self, char):
+        """
+        Validate the characters entered in the interval entry box.
+        Allow only numeric characters and a single decimal point.
+        """
+        if char.isdigit():
+            return True
+        elif char == '.' and '.' not in self.interval_var.get():
+            return True
+        else:
+            return False
+    
+    def delete_position(self):
+        try:
+            selected_index = self.position_listbox.curselection()[0]
+            del self.positions[selected_index]
+            self.save_positions()
+            self.update_position_listbox()
+        except IndexError:
+            messagebox.showwarning("Delete Position", "Please select a position to delete.")
+        except Exception as e:
+            print(f"Error in delete_position: {e}")
+
+if __name__ == "__main__":
+    try:
+        # Set the working directory to the script's directory
+        script_dir = os.path.dirname(os.path.realpath(__file__))
+        os.chdir(script_dir)
+
+        print("Starting application...")
+        root = tk.Tk()
+        app = ClickRecorder(root)
+        root.mainloop()
+        print("Application exited.")
+    except Exception as e:
+        print(f"Error in main: {e}")
